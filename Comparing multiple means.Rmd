@@ -1,0 +1,183 @@
+# Experiment background
+An experiment was run to determine whether consuming a ketone containing drink lowers blood glucose and non esterified fatty acids (NEFA, AKA free fatty acids). Ten participants were recruited to a matched-group-design, random-order-controlled study. A baseline blood sample was taken (time = 0 min) and participants then consumed a ketone-containing drink. Further blood measurements were taken at 30, 60 and 90 min while they rested. The experiment has 2 independent variables (Condition (2 levels) and Time (4 levels)).
+
+This vignette will go through the process of:
+* visualising data using line plots;
+* parametric assumption testing;
+* 2-way ANOVA (± repeated measures); and
+* post-hoc tests.
+
+---
+
+# Load packages
+
+```{R message=FALSE}
+
+if (!require('rmarkdown')) {
+  install.packages("rmarkdown")
+}
+if (!require('knitr')) {
+  install.packages("knitr")
+}
+if (!require('ggplot2')) {
+  install.packages("ggplot2")
+}
+if (!require('ggpubr')) {
+  install.packages("ggpubr")
+}
+if (!require('dplyr')) {
+  install.packages("dplyr")
+}
+if (!require('rstatix')) {
+  install.packages("rstatix")
+}
+if (!require('emmeans')) {
+  install.packages("emmeans")
+}
+library("rmarkdown")
+library("knitr")
+library("ggplot2")
+library("ggpubr")
+library("dplyr")
+library("rstatix")
+library("emmeans")
+```
+
+---
+
+# Loading and inspecting the data 
+First, set your working directory (Session -> Set Working Directory -> Choose Directory). Then, load the .csv file from your working directory and assign it to an object called ketone.
+
+```{R}
+ketone <- read.csv("Example_data_set.csv")
+```
+
+Let's look at the structure of the ketone data frame.
+
+```{R}
+str(ketone)
+```
+
+Condition, Time and ID must be converted to factors (because they are nominal data). Also, it would be useful to change the labels for time to baseline (BL), 30 min, 60 min and 90 min.
+
+```{R}
+ketone$Time <- factor(ketone$Time,
+                      levels = c(0, 30, 60, 90),
+                      labels = c("BL", "30 min", "60 min", "90 min"))
+ketone$Condition <- factor(ketone$Condition)
+ketone$ID <- factor(ketone$ID)
+```
+
+And now check this has worked...
+
+```{R}
+str(ketone)
+```
+
+# Visualising the data
+Perhaps the best way to visualise the data is with a line graph. We will use the ggline function in the ggpubr package to create the line graph.
+
+```{R}
+
+Glu_line <- ggline(ketone, x = "Time", y = "Glucose", color = "Condition",
+                   add = c("mean_se", "jitter"),
+                   palette = c("lancet"),
+                   xlab = ("Time (min)"),
+                   ylab = ("Glucose (mmol/L)")
+)
+Glu_line
+```
+
+---
+# Parametric assumption testing
+
+### Are there any outliers?
+We can use the group_by function (part of the dplyr package) and the identify_outliers function (part of the rstatix package) to determine whether there are any outliers.
+
+```{R}
+ketone %>%
+  group_by(Condition, Time) %>%
+  identify_outliers(Glucose)
+```
+
+One non-extreme outlier is identified. It would be useful to understand how outliers are determined (displayed in the 'Help' window).
+
+```{R message=FALSE}
+?identify_outliers
+```
+
+This is not a real outlier (i.e., due to experimental error). Rather, it is an example of biological variability, so we will keep it in subsequent analyses.
+
+### Are the observations independent?
+Yes. Participants were randomly assigned to groups.
+
+### Is the data normally distributed?
+Let's create QQ plots for each condition, at each level of time. For this, we will use the ggqqplot function (part of the ggpubr package) and the facet_grid function (part of ggplot2).
+
+```{R}
+Glu_QQ <- ggqqplot(ketone, x = "Glucose",
+         color = "Condition",
+         palette = c("#00AFBB", "#E7B800")
+         ) +
+          facet_grid(Time ~ Condition, labeller = "label_both")
+Glu_QQ
+```
+
+The points ~fall along the reference line, so we may assume normality. We can perform a Shapiro-Wilk test to statistically determine (i.e., assign a p-value) whether the data is normally distributed in each condition, for each level of time.
+
+```{R}
+ketone %>%
+  group_by(Condition, Time) %>%
+  shapiro_test(Glucose)
+```
+All are p>0.05, so we may proceed.
+
+### Is there homogeneity of variance?
+For this, we will use the Bartlett test using the bartlett.test function (part of the pre-loaded stats package).
+
+```{R}
+bartlett.test(Glucose ~ interaction(Condition, Time), data=ketone)
+```
+
+Note that we use the term interaction(Condition, Time) as there are multiple independent variables. The result is not significant, so we can move on to test the data. 
+
+---
+
+## 2-way ANOVA
+Let's think what the question is... Does blood glucose concentration depend on the study condition (ketone vs. control) and/or time (BL, 30 min, 60 min and 90 min). We can use the analysis of variance function (part of the pre-loaded stats package) to test this. A couple of things to check first.
+* Is the data in long format? This means that repeated measures for each participant (that is, at different levels of time) are shown in rows, not columns. We can check this...
+
+```{R}
+head(ketone)
+```
+
+* Have variables (in this case: Participant ID, Condition and Time) been converted to factors?
+
+```{R}
+str(ketone)
+```
+
+Yes for both, so we can proceed. We will use aov function (part of the pre-loaded stats package).
+
+```{R}
+glu_2anova <- aov(Glucose ~ Condition * Time, data = ketone)
+summary(glu_2anova)
+```
+
+The Condition * Time indicate that this is a 2-way ANOVA (i.e., 2 independent variables). There is a significant ANOVA effect of condition on blood glucose concentration. Additionally, the effect of condition on blood glucose concentrations depends on time, which we may have predicted from the line graph we created. 
+
+If this was a repeated measured design we would simply add a participant error term to this line of code...
+
+glu_2anova <- aov(Glucose ~ Condition * Time + Error(ID), data = ketone)
+
+---
+
+## Post-hoc tests
+We are interested in the interaction effects (i.e., we'll analyse the effect of condition on blood [glucose] at every level of time). For this, we use the emmeans package to perform post-hoc pairwise comparisons. 
+
+```{R}
+glu_post1 <- emmeans(glu_2anova, specs = pairwise ~ Condition|Time, type = "tukey")
+glu_post1
+```
+
+We see that glucose was the same at BL, but different at 30 min, 60 min and 90 min. Note, the emmeans package automatically adjusts for multiple comparisons.
