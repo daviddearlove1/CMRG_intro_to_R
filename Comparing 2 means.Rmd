@@ -1,0 +1,193 @@
+The goal here is to provide a relatively easy-to-follow vignette for comparing two means in R. The excel file associated with this vignette can be downloaded below. To follow along with the vignette, download and save to your computer as a .csv file.
+
+The Rmarkdown file and R script file (not yet uploaded) can be found at the followiung Gituhub repository.
+
+---
+
+# Experiment background
+An experiment was run to determine whether consuming a ketone containing drink lowers blood glucose and non esterified fatty acids (NEFA, 
+AKA free fatty acids). Ten participants were recruited to a matched-group-design, random-order-controlled study. A baseline blood sample 
+was taken (time = 0 min) and participants then consumed a ketone-containing drink. Further blood measurements were taken at 30, 60 and 
+90 min while they rested. The experiment has 2 independent variables (Condition (2 levels) and Time (4 levels)).
+
+This vignette will go through the process of:
+* visualising data using histograms and box plots;
+* parametric assumption testing;
+* student's t-test
+
+---
+
+# Load packages
+
+```{R message=FALSE}
+
+if (!require('dplyr')) {
+  install.packages("dplyr")
+}
+if (!require('rmarkdown')) {
+  install.packages("rmarkdown")
+}
+if (!require('knitr')) {
+  install.packages("knitr")
+}
+if (!require('ggplot2')) {
+  install.packages("ggplot2")
+}
+if (!require('rstatix')) {
+  install.packages("rstatix")
+}
+library("rmarkdown")
+library("knitr")
+library("ggplot2")
+library("rstatix")
+```
+
+---
+
+# Loading and inspecting the data 
+First, set your working directory (Session -> Set Working Directory -> Choose Directory). Then, load the .csv file from your working directory and assign it to an object called ketone.
+
+```{R}
+ketone <- read.csv("Example_data_set.csv")
+```
+
+Let's look at the structure of the ketone data frame.
+
+```{R}
+str(ketone)
+```
+
+And then sample 10 random rows using the sample_n function, which is part of the dplyr package.
+
+```{R}
+sample_n(ketone, 10)
+```
+
+---
+
+# Visulasing the data
+
+For this example, we are interested in determining whether there is a difference between body mass in the ketone and control conditions. We will start by visualising the data. To do this, we'll use the ggplot2 package. There are 3 steps to creating a plot using the ggplot2 package.
+
+1. define the data to be analysed;
+2. define the plot aesthetics; and
+3. define the plot geomtery.
+
+To demonstrate this, let's make a histrogram comparing body mass between groups.
+
+```{R}
+ggplot(ketone, aes(x=Body_mass))
+```
+The above line of code can be broken down as: ggplot(data frame name, aes(on the x axis, plot body mass)). We have covered 2/3 steps: (i) we have defined the data; and (ii) we have defined the aesthetic (in this case, what we are plotting on the x axis). As you can see above, running this code produces an empty screen. This is becasue we have not added a plot geometry. 
+
+```{R}
+ggplot(ketone, aes(x=Body_mass)) + 
+  geom_histogram()
+```
+In this case, this we added geom_histogram(). Delete this line and type geom_. Scroll through the many types of graphs you can create. The histogram above is fine, but we could make it more informative and attractive. Let's change the bin sizes and colours.
+
+```{R}
+ggplot(ketone, aes(x=Body_mass)) + 
+  geom_histogram(binwidth = 5, color="black", fill="white")
+```
+That certainly looks nicer and retains the information we need: i.e., that 7/13 or 53% of indviduals are approximately 75 kg with an approximate range of values from 40 kg to 100 kg.
+
+Finally, let's change the titles for the axes. Also, let's save this graph to an object called BM_hist.
+
+```{R}
+BM_hist <- ggplot(ketone, aes(x=Body_mass)) +
+  geom_histogram(binwidth = 5, color="black", fill="white") +
+  xlab("Body mass (kg)") +
+  ylab("Count")
+BM_hist
+```
+To save the plot, we can run the following line of code. Note: this will save the last plot created to your working directory.
+
+```{R}
+ggsave("body mass.png", width = 5, height = 5)
+```
+
+The data may be better visualized through a box plot. The same 3 steps are required to create the box plot: (i) data; (ii) asesthetic; and (iii) geometry. 
+
+```{R} 
+BM_box <- ggplot(ketone, aes(x=Condition, y=Body_mass, fill = Condition)) +
+  geom_boxplot()
+BM_box
+```
+Notice that the warning "removed 60 rows containing non-finite values" is given. If you refer back to the ketone data frame, you'll see that body mass was only measured at baseline. Therefore, it has (correctly) decided to ignore the missing values.
+
+You'll notice that we included "fill = Conditon" in the aesthetic. This ensures the colours used are different for each condition. However, we may wish to change the colour scheme. There are many ways to do this, but my preferred is to use the hexadecimal colour code.
+
+```{R}
+BM_box +
+  scale_fill_manual(values=c("#999999", "#E69F00"))
+```
+Note: above, we have added another level to our object, BM_box (using the +). However, this new level has not been assigned (saved) to thatr object. Therefore, if we print the object...
+
+```{R}
+BM_box
+```
+...the old colour scheme is shown. To fix this, we would need to do the following...
+
+```{R}
+BM_box <- BM_box +
+  scale_fill_manual(values=c("#999999", "#E69F00"))
+```
+
+Finally, let's add jittered data points to the figure and visualise any outliers as red oversized data points.
+
+```{R}
+BM_box +
+    geom_jitter()
+```
+
+---
+
+# Parametric assumption testing
+
+## Are there any outliers?
+We can see that there are no outliers in this data (outliers would be shown as data points beyond the whiskers in the box plot).
+
+## Are the data normally distributed?
+We can see that body mass in the control group appears to be evenly distributed. In the ketone group, however, the data appears to be leftward skewed. Let's perform a Shapiro Wilk test to check. 
+
+```{R}
+ketone %>%
+  group_by(Condition) %>%
+  shapiro_test(Body_mass)
+```
+The P values are >0.05, so we can assume normality (remember that we are testing the null hypothesis that the data are not normally distributed).
+
+Remember that I said we had a number of NA values in our Body_mass variable. Maybe these are affecting the outcome of the Shapiro Wilk test. Let's check to be sure. One way to do this is to create a new object (data frame) that omits all entries where an NA is present in the Body_mass variable. To do this, we use the filter function (part of the dplyr package).
+
+```{R}
+BM_NA <- ketone %>%
+  filter(!is.na(Body_mass))
+BM_NA
+```
+Now let's perform the Shapiro Wilk test on the new object.
+
+```{R}
+BM_NA %>%
+  group_by(Condition) %>%
+  shapiro_test(Body_mass)
+```
+The same result!
+
+# Is there homogeneity of variance?
+We'll use the F-test to test for homogeneity of variance.
+
+```{R}
+var.test(Body_mass ~ Condition, data = ketone)
+```
+
+Note: the tilde (~) can be interpreted as saying, "as a function of". The p value is >0.05, so we can assume homogeneity of variance. We can now proceed to test our null hypothesis that body mass in the control and ketone group are different.
+
+#Student's t test
+
+```{R}
+t.test(Body_mass ~ Condition, data = ketone, var.equal = TRUE)
+```
+
+Our p value is >0.05, so we cannot reject our null hypothesis. So, we can say with high probability that the true mean difference between our conditions would be ~equal to what we observed.
+
